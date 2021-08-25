@@ -7,7 +7,7 @@ export class AppController {
 
   @Get()
   getHello(): string {
-    // intial commit
+    // start control
     return this.appService.getHello();
   }
 }
