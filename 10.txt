@@ -1,2 +1,0 @@
-content for file 10
-new line
