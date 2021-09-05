@@ -1,0 +1,10 @@
+import { Entity, PrimaryGeneratedColumn, Column } from "typeorm";
+
+@Entity({ name: '{table_name}' })
+export class { entity_class } {
+
+    @PrimaryGeneratedColumn()
+    id: number;
+
+    @Column({ type: '{column_type}', name: '{column_name}' })
+    { entity_property }: { entity_Property_type };
