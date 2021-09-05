@@ -18,12 +18,12 @@ export class AppService {
           const url = msg?.embeds[0]?.description.split('\n').slice(-1).pop();
           const commit_sha = url.substring(url.indexOf('('), url.indexOf(')')).split('/').pop();
 
-          const repoCommits = await octoGit.repos.getCommit({ "owner": 'vs8871', "repo": 'entity-auto-creation', "ref": commit_sha });
+          const repoCommits = await octoGit.repos.getCommit({ "owner": 'vs8871', "repo": 'auth-repo', "ref": commit_sha });
           const data: InputData[] = [];
           for (let index = 0; index < repoCommits?.data?.files.length; index++) {
             const blob_sha = repoCommits?.data?.files[index].sha;
 
-            const blobs = await octoGit.git.getBlob({ "file_sha": blob_sha, "owner": 'vs8871', "repo": 'entity-auto-creation' });
+            const blobs = await octoGit.git.getBlob({ "file_sha": blob_sha, "owner": 'vs8871', "repo": 'auth-repo' });
 
             const fileContent = atob(blobs.data.content.replaceAll('\n', ''));
 
@@ -42,7 +42,7 @@ export class AppService {
 
                 const { pathOfFile, entityFileName, fileSha } =
                   await this.getExistingEntityDetails(octoGit, tableName);
-                const entityBlob = await octoGit.git.getBlob({ "file_sha": fileSha, "owner": 'vs8871', "repo": 'entity-auto-creation' });
+                const entityBlob = await octoGit.git.getBlob({ "file_sha": fileSha, "owner": 'vs8871', "repo": 'auth-repo' });
                 const existingEntityContent = atob(entityBlob.data.content.replaceAll('\n', ''));
 
                 // ALTER TABLE distributors ADD COLUMN address varchar(30);
@@ -54,27 +54,30 @@ export class AppService {
             }
           }
 
-          const commit = await octoGit.git.getCommit({ "commit_sha": commit_sha, "owner": 'vs8871', "repo": 'entity-auto-creation' });
+          const libraryCommit = await octoGit.repos.getCommit({
+            owner:
+              'vs8871', ref: 'master', 'repo': 'entity-library'
+          });
 
           const tree = await octoGit.git.getTree({
-            "owner": 'vs8871', "repo": 'entity-auto-creation',
-            "tree_sha": commit.data.tree.sha, "recursive": "1"
+            "owner": 'vs8871', "repo": 'entity-library',
+            "tree_sha": libraryCommit?.data?.commit?.tree?.sha, "recursive": "1",
           });
 
           let createTreeResponse;
           createTreeResponse = await octoGit.git.createTree({
             "owner": 'vs8871',
-            "repo": 'entity-auto-creation',
+            "repo": 'entity-library',
             tree:
               this.getFileContent(data, tree)
           });
 
           const commitResponse = await octoGit.git.createCommit({
             "owner": 'vs8871',
-            "repo": 'entity-auto-creation',
+            "repo": 'entity-library',
             message: `updated by autobot`,
             tree: createTreeResponse.data.sha,
-            parents: [commit_sha],
+            parents: [libraryCommit?.data?.sha],
           });
 
           const branchName = `refs/heads/snippetbot/updated-snippet-${Date.now()}`;
@@ -82,7 +85,7 @@ export class AppService {
 
           await octoGit.git.createRef({
             "owner": 'vs8871',
-            "repo": 'entity-auto-creation',
+            "repo": 'entity-library',
             ref: branchName,
             sha: commitResponse.data.sha,
           });
@@ -90,7 +93,6 @@ export class AppService {
           const s = createTreeResponse;
         }
         if (msg.content == 'ping') {
-
           msg.reply('pong');
           msg.channel.send('pong');
         }
@@ -124,7 +126,7 @@ export class AppService {
 
   private async getExistingEntityDetails(octoGit: any, searchKey: string) {
     const files = await octoGit.search.code({
-      "q": `${searchKey} user:vs8871 repo:vs8871/entity-auto-creation`,
+      "q": `${searchKey} user:vs8871 repo:vs8871/auth-repo`,
       "mediaType": { format: 'text-match' }
     });
     const pathOfFile = files.data.items[0].path;
