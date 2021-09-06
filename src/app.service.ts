@@ -27,7 +27,8 @@ export class AppService {
 
             const fileContent = atob(blobs.data.content.replaceAll('\n', ''));
 
-            const queries = fileContent.split(';');
+            let queries = fileContent.split(';');
+            queries = queries.map(s => s.replaceAll('\n', ''));
 
             for (let index = 0; index < queries.length; index++) {
               const query = queries[index]?.toLocaleLowerCase();
@@ -36,61 +37,40 @@ export class AppService {
 
                 this.setEntityData(entityStr, tableName, data);
               }
-              if (query?.startsWith('alter table') && query?.includes('add column')) {
+              else if (query?.startsWith('alter table') && query?.includes('add column')) {
                 const { tableName, columnName, columnType, entityColumnName, entityColumnType } =
                   this.getEntityDetails(query);
 
                 const { pathOfFile, entityFileName, fileSha } =
                   await this.getExistingEntityDetails(octoGit, tableName);
-                const entityBlob = await octoGit.git.getBlob({ "file_sha": fileSha, "owner": 'vs8871', "repo": 'auth-repo' });
+                const entityBlob = await octoGit.git.getBlob({ "file_sha": fileSha, "owner": 'vs8871', "repo": 'entity-library' });
                 const existingEntityContent = atob(entityBlob.data.content.replaceAll('\n', ''));
 
-                // ALTER TABLE distributors ADD COLUMN address varchar(30);
                 const alterEntity = this.updateExistingEntity(existingEntityContent,
                   columnName, columnType, entityColumnName, entityColumnType);
 
                 this.setEntityData(alterEntity, entityFileName, data, pathOfFile);
+                // todo check for multiple query for same table
+              }
+              else if (query?.startsWith('alter table') && query?.includes('drop column')) {
+                // to do for drop column
+              }
+              else if (query?.startsWith('alter table') && query?.includes('alter column') && query?.includes('type')) {
+                // to do for changing the data type of column
+              }
+              else if (query?.startsWith('alter table') && query?.includes('rename column')) {
+                // to do for renaming the column
+              }
+              else if (query?.startsWith('alter table') && query?.includes('rename') && !query?.includes('rename column')) {
+                // to do for renaming the table
+              }
+              else if (query?.startsWith('drop table')) {
+                // to do for dropping the table
               }
             }
           }
 
-          const libraryCommit = await octoGit.repos.getCommit({
-            owner:
-              'vs8871', ref: 'master', 'repo': 'entity-library'
-          });
-
-          const tree = await octoGit.git.getTree({
-            "owner": 'vs8871', "repo": 'entity-library',
-            "tree_sha": libraryCommit?.data?.commit?.tree?.sha, "recursive": "1",
-          });
-
-          let createTreeResponse;
-          createTreeResponse = await octoGit.git.createTree({
-            "owner": 'vs8871',
-            "repo": 'entity-library',
-            tree:
-              this.getFileContent(data, tree)
-          });
-
-          const commitResponse = await octoGit.git.createCommit({
-            "owner": 'vs8871',
-            "repo": 'entity-library',
-            message: `updated by autobot`,
-            tree: createTreeResponse.data.sha,
-            parents: [libraryCommit?.data?.sha],
-          });
-
-          const branchName = `refs/heads/snippetbot/updated-snippet-${Date.now()}`;
-          console.log(`creating new branch named ${branchName}`);
-
-          await octoGit.git.createRef({
-            "owner": 'vs8871',
-            "repo": 'entity-library',
-            ref: branchName,
-            sha: commitResponse.data.sha,
-          });
-
-          const s = createTreeResponse;
+          await this.createNewCommit(octoGit, data);
         }
         if (msg.content == 'ping') {
           msg.reply('pong');
@@ -101,6 +81,44 @@ export class AppService {
     } catch (error) {
       console.log(error);
     }
+  }
+
+  private async createNewCommit(octoGit, data: InputData[]) {
+    const libraryCommit = await octoGit.repos.getCommit({
+      owner: 'vs8871', ref: 'master', 'repo': 'entity-library'
+    });
+
+    const tree = await octoGit.git.getTree({
+      "owner": 'vs8871', "repo": 'entity-library',
+      "tree_sha": libraryCommit?.data?.commit?.tree?.sha, "recursive": "1",
+    });
+
+    let createTreeResponse;
+    createTreeResponse = await octoGit.git.createTree({
+      "owner": 'vs8871',
+      "repo": 'entity-library',
+      tree: this.getFileContent(data, tree)
+    });
+
+    const commitResponse = await octoGit.git.createCommit({
+      "owner": 'vs8871',
+      "repo": 'entity-library',
+      message: `updated by autobot`,
+      tree: createTreeResponse.data.sha,
+      parents: [libraryCommit?.data?.sha],
+    });
+
+    const branchName = `refs/heads/snippetbot/updated-snippet-${Date.now()}`;
+    console.log(`creating new branch named ${branchName}`);
+
+    await octoGit.git.createRef({
+      "owner": 'vs8871',
+      "repo": 'entity-library',
+      ref: branchName,
+      sha: commitResponse.data.sha,
+    });
+
+    const s = createTreeResponse;
   }
 
   private setEntityData(entityStr: any, tableName: string, data: InputData[], pathOfFile?: string) {
@@ -116,7 +134,7 @@ export class AppService {
     const queryItem = query.split(' ');
     const tableName = queryItem[2];
     const columnName = queryItem[5];
-    const columnType = queryItem[6].substring(0, queryItem[6].indexOf('(') - 1);
+    const columnType = queryItem[6].substring(0, queryItem[6].indexOf('('));
 
     const entityColumnName = this.convertsnakeToCamel(columnName);
     const entityColumnType = this.getColumnType(columnType);
@@ -126,7 +144,7 @@ export class AppService {
 
   private async getExistingEntityDetails(octoGit: any, searchKey: string) {
     const files = await octoGit.search.code({
-      "q": `${searchKey} user:vs8871 repo:vs8871/auth-repo`,
+      "q": `${searchKey} user:vs8871 repo:vs8871/entity-library`,
       "mediaType": { format: 'text-match' }
     });
     const pathOfFile = files.data.items[0].path;
@@ -159,7 +177,7 @@ export class AppService {
 
     const columns = columnsString.split(',');
     let entityTemplate = this.getEntityTemplate();
-    const tableName = columnStr.substring(0, (query.indexOf('(')) - 1).split(' ').pop();
+    const tableName = columnStr.substring(0, (query.indexOf('('))).split(' ').pop();
     let entityClassName = this.convertsnakeToCamel(tableName);
     entityClassName = entityClassName.charAt(0).toUpperCase() + entityClassName.slice(1);
     let entityStr = entityTemplate;
@@ -252,24 +270,8 @@ export class AppService {
       input.push(obj);
     }
 
-    input.push(...tree.data.tree.filter(el => el.type !== 'tree' && el.path !== data[0].path) as any);
+    input.push(...tree.data.tree.filter(el => el.type !== 'tree' && !(input.map(m => m.path)).includes(el.path)));
 
     return input;
-    // return [
-    //   {
-    //     path: file.path,
-    //     content: file.content,
-    //     mode: '100644',
-    //     type: 'blob',
-    //     // sha: srcTree.sha,
-    //   }, {
-    //     path: file2.path,
-    //     content: file2.content,
-    //     mode: '100644',
-    //     type: 'blob',
-    //   },
-    //   ...tree.data.tree.filter(el => el.type !== 'tree' && el.path !== path) as any
-    // ];
   }
 }
-
