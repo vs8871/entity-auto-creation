@@ -14,7 +14,7 @@ export class AppService {
       const clientObj: any = new DiscortBot();
 
       clientObj.on('message', async (msg: any) => {
-        if (msg?.embeds[0]?.title?.includes('new commit')) {
+        if (msg?.embeds[0]?.title?.includes('new commit') && msg?.embeds[0]?.title?.includes('master')) {
           const commit_sha = this.getCommitSha(msg);
 
           const repoCommits = await octoGit.repos.getCommit({
@@ -30,27 +30,27 @@ export class AppService {
             const fileContent = atob(blobs.data.content.replaceAll('\n', ''));
             const queries = fileContent.split(';')
               ?.map((s) => s.replaceAll('\n', ''))
-              ?.map((s) => s.replaceAll('\r', ''));
+              ?.map((s) => s.replaceAll('\r', ''))
+              ?.map((s) => s.replaceAll('\t', ''))
+              ?.filter((y) => y.trim() != '');
 
-            // to do fix empty array issue
-            // fix .includes issue for all cases
             for (let index = 0; index < queries.length; index++) {
               const query = queries[index]?.toLocaleLowerCase()?.replace(/\s{2,}/g, ' ')?.trim();
 
               if (query?.startsWith('create table')) {
-                this.setCreateTableData(queries, index, data);
+                this.setCreateTableData(query, data);
               }
               else if (query?.startsWith('alter table') && query?.includes('add column')) {
-                await this.setAddColumnData(query, data, octoGit);
+                data = await this.setAddColumnData(query, data, octoGit);
               }
               else if (query?.startsWith('alter table') && query?.includes('drop column')) {
-                await this.setDropColumnData(query, data, octoGit);
+                data = await this.setDropColumnData(query, data, octoGit);
               }
               else if (query?.startsWith('alter table') && query?.includes('alter column') && query?.includes('type')) {
-                await this.setColumnDataTypeChangeData(query, data, octoGit);
+                data = await this.setColumnDataTypeChangeData(query, data, octoGit);
               }
               else if (query?.startsWith('alter table') && query?.includes('rename column')) {
-                await this.setRenameColumnData(query, data, octoGit);
+                data = await this.setRenameColumnData(query, data, octoGit);
               }
               else if (query?.startsWith('alter table') && query?.includes('rename') && !query?.includes('rename column')) {
                 await this.setTableRenameData(query, octoGit, data);
@@ -64,10 +64,6 @@ export class AppService {
             await this.createNewCommit(octoGit, data);
           }
         }
-        // if (msg.content == 'ping') {
-        //   msg.reply('pong');
-        //   msg.channel.send('pong');
-        // }
       });
     } catch (error) {
       console.log(error);
@@ -183,6 +179,7 @@ export class AppService {
 
       this.setEntityData(alterEntity, entityFileName, data, pathOfFile);
     }
+    return data;
   }
 
   private async setColumnDataTypeChangeData(
@@ -234,6 +231,7 @@ export class AppService {
         this.setEntityData(alterEntity, entityFileName, data, pathOfFile);
       }
     }
+    return data;
   }
 
   private async setDropColumnData(query: string, data: InputData[], octoGit) {
@@ -279,6 +277,7 @@ export class AppService {
         this.setEntityData(alterEntity, entityFileName, data, pathOfFile);
       }
     }
+    return data;
   }
 
   private async setAddColumnData(query: string, data: InputData[], octoGit) {
@@ -332,10 +331,11 @@ export class AppService {
         this.setEntityData(alterEntity, entityFileName, data, pathOfFile);
       }
     }
+    return data;
   }
 
-  private setCreateTableData(queries: string[], index: number, data: InputData[]) {
-    const { entityStr, tableName } = this.createNewEntity(queries[index]);
+  private setCreateTableData(query: string, data: InputData[]) {
+    const { entityStr, tableName } = this.createNewEntity(query);
 
     this.setEntityData(entityStr, tableName, data);
   }
@@ -607,14 +607,14 @@ export class AppService {
     let index = entityArr.findIndex((j) => j.includes(values.columnName));
     if (~index) {
       let newColumnTemplate = this.getNewColumn();
-
+      newColumnTemplate = newColumnTemplate.substr(0, newColumnTemplate.length - 1);
       newColumnTemplate = newColumnTemplate
         .replaceAll('{column_type}', values.columnType)
         .replaceAll('{column_name}', values.columnName)
         .replaceAll('{ entity_property }', values.entityColumnName)
         .replaceAll('{ entity_Property_type }', values.entityColumnType);
 
-      newColumnTemplate += '\n\n';
+      newColumnTemplate = '\r\n\r\n' + newColumnTemplate;
       entityArr[index] = newColumnTemplate;
     }
 
@@ -633,7 +633,7 @@ export class AppService {
     return updatedEntity;
   }
 
-  private async createNewCommit(octoGit, data: InputData[]) {
+  private async createNewCommit(octoGit: Octokit, data: InputData[]) {
     const libraryCommit = await octoGit.repos.getCommit({
       owner: 'vs8871',
       ref: 'master',
@@ -673,6 +673,14 @@ export class AppService {
     });
 
     console.log('branch created successfully');
+
+    console.log(`creating PR for branch ${branchName}`);
+    await octoGit.pulls.create({
+      'owner': 'vs8871', 'repo': 'entity-library'
+      , base: 'master', head: branchName,
+      title: `Added new files by Autobot at ${Date.now()}`, maintainer_can_modify: true
+    });
+    console.log('assigning PR to reviewers');
   }
 
   private setEntityData(entityStr: any, tableName: string, data: InputData[], pathOfFile?: string) {
@@ -814,14 +822,14 @@ export class AppService {
     return { tableName, entityValues };
   }
 
-  private async getExistingEntityDetails(octoGit: any, searchKey: string) {
+  private async getExistingEntityDetails(octoGit: Octokit, searchKey: string) {
     const files = await octoGit.search.code({
       q: `${searchKey} user:vs8871 repo:vs8871/entity-library`,
       mediaType: { format: 'text-match' },
     });
-    const pathOfFile = files.data.items[0].path;
-    const entityFileName = files.data.items[0].name;
-    const fileSha = files.data.items[0].sha;
+    const pathOfFile = files?.data?.items[0]?.path;
+    const entityFileName = files?.data?.items[0]?.name;
+    const fileSha = files?.data?.items[0]?.sha;
     return { pathOfFile, entityFileName, fileSha };
   }
 
@@ -837,7 +845,7 @@ export class AppService {
       .substring(0, existingEntityContent.trim().length - 1);
 
     const newColumnTemplate = this.getNewColumn();
-    entityToUpdate += '\r\n\r\n' + newColumnTemplate;
+    entityToUpdate += '\r\n' + newColumnTemplate;
 
     entityToUpdate = entityToUpdate
       .replaceAll('{column_type}', columnType)
@@ -851,12 +859,12 @@ export class AppService {
   }
 
   createNewEntity(query: string) {
-    const columnStr = query.replaceAll('\n', '');
-    const columnsString = columnStr.substring(columnStr.indexOf('(') + 1, columnStr.indexOf(')'));
+    const columnStr = query.replaceAll('\n', '')?.trim();
+    const columnsString = columnStr.substring(columnStr.indexOf('(') + 1, columnStr.length - 1)?.trim();
 
     const columns = columnsString.split(',');
     let entityTemplate = this.getEntityTemplate();
-    const tableName = columnStr.substring(0, query.indexOf('(')).split(' ').pop();
+    const tableName = columnStr.substring(0, query.indexOf('(')).split(' ')?.filter((y) => y.trim() != '').pop();
     let entityClassName = this.convertsnakeToCamel(tableName);
     entityClassName = entityClassName.charAt(0).toUpperCase() + entityClassName.slice(1);
     let entityStr = entityTemplate;
